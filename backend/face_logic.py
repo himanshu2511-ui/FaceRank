@@ -1,10 +1,14 @@
-import cv2
-import mediapipe as mp
+import io
 import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
+from PIL import Image
+import mediapipe as mp
+
 mp_face_mesh = mp.solutions.face_mesh
+
+# ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def _euclidean_3d(p1, p2):
     return np.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2 + (p2.z - p1.z)**2)
@@ -27,8 +31,7 @@ def _symmetry_score(landmarks, left_indices, right_indices):
 
 def _golden_ratio_score(m1, m2):
     if m2 == 0: return 0.0
-    GOLDEN = 1.618
-    deviation = abs(m1 / m2 - GOLDEN) / GOLDEN
+    deviation = abs(m1 / m2 - 1.618) / 1.618
     return float(max(0, 1 - deviation))
 
 def _smoothness(points):
@@ -43,6 +46,8 @@ def _smoothness(points):
     if not curvatures: return 0.5
     variance = np.var(curvatures)
     return float(min(1.0, np.exp(-10 * variance) if variance > 0 else 1.0))
+
+# ── Core analysis ─────────────────────────────────────────────────────────────
 
 def _analyse_landmarks(landmarks):
     scores = {}
@@ -96,10 +101,10 @@ def _analyse_landmarks(landmarks):
     scores["Eye_Aesthetics"] = eye_score
 
     # 4. Nose
-    nose_w = _euclidean_3d(landmarks[98], landmarks[327])
+    nose_w  = _euclidean_3d(landmarks[98], landmarks[327])
     nose_h2 = _euclidean_3d(landmarks[168], landmarks[2])
     ns = _golden_ratio_score(nose_h2, nose_w) if nose_w > 0 else 0.5
-    nasal = _get_angle(landmarks[2], landmarks[1], landmarks[0])
+    nasal   = _get_angle(landmarks[2], landmarks[1], landmarks[0])
     nasal_s = float(max(0, 1 - abs(nasal - 100) / 50))
     scores["Nose_Aesthetics"] = float(0.6 * ns + 0.4 * nasal_s)
 
@@ -107,10 +112,7 @@ def _analyse_landmarks(landmarks):
     mw2 = _euclidean_3d(landmarks[61], landmarks[291])
     ulh = _euclidean_3d(landmarks[0],  landmarks[13])
     llh = _euclidean_3d(landmarks[14], landmarks[17])
-    if llh > 0:
-        lip_r = float(max(0, 1 - abs(ulh/llh - 0.5) / 0.5))
-    else:
-        lip_r = 0.5
+    lip_r = float(max(0, 1 - abs(ulh/llh - 0.5) / 0.5)) if llh > 0 else 0.5
     if mw2 > 0:
         cupid = float(max(0, 1 - abs(
             _euclidean_3d(landmarks[61], landmarks[62]) -
@@ -121,7 +123,7 @@ def _analyse_landmarks(landmarks):
     scores["Lip_Aesthetics"] = float(0.5 * lip_r + 0.5 * cupid)
 
     # 6. Jawline
-    jaw_angle = _get_angle(landmarks[172], landmarks[152], landmarks[397])
+    jaw_angle   = _get_angle(landmarks[172], landmarks[152], landmarks[397])
     jaw_a_score = float(max(0, 1 - abs(jaw_angle - 120) / 60))
     jaw_idx = [172, 136, 150, 149, 148, 152, 377, 400, 378, 379, 397]
     jaw_pts = [[landmarks[i].x, landmarks[i].y] for i in jaw_idx if i < len(landmarks)]
@@ -136,33 +138,31 @@ def _analyse_landmarks(landmarks):
     std = float(np.std(feature_vals)) if len(feature_vals) > 1 else 0.0
     scores["Facial_Harmony"] = float(max(0, min(1, 1 - std)))
 
-    # Clamp all
     for k in scores:
         scores[k] = float(max(0.0, min(1.0, scores[k])))
     return scores
 
 WEIGHTS = {
-    "Facial_Symmetry":      0.25,
+    "Facial_Symmetry":        0.25,
     "Golden_Ratio_Alignment": 0.20,
-    "Facial_Harmony":       0.15,
-    "Eye_Aesthetics":       0.12,
-    "Lip_Aesthetics":       0.10,
-    "Jawline_Aesthetics":   0.08,
-    "Nose_Aesthetics":      0.07,
-    "Skin_Quality":         0.03,
+    "Facial_Harmony":         0.15,
+    "Eye_Aesthetics":         0.12,
+    "Lip_Aesthetics":         0.10,
+    "Jawline_Aesthetics":     0.08,
+    "Nose_Aesthetics":        0.07,
+    "Skin_Quality":           0.03,
 }
 
 def analyze_face(image_bytes: bytes) -> dict | None:
     """
     Accepts raw image bytes, runs MediaPipe face mesh, returns score dict.
-    Returns None if no face detected.
+    Uses Pillow for decoding — no OpenCV / libGL dependency.
     """
-    nparr  = np.frombuffer(image_bytes, np.uint8)
-    frame  = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if frame is None:
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        rgb = np.array(img)
+    except Exception:
         return None
-
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     with mp_face_mesh.FaceMesh(
         static_image_mode=True,
@@ -182,6 +182,6 @@ def analyze_face(image_bytes: bytes) -> dict | None:
     total = float(max(0.0, min(1.0, total)))
 
     return {
-        "total_score": round(total * 100, 2),   # 0-100
+        "total_score": round(total * 100, 2),
         "scores": {k: round(v * 100, 2) for k, v in scores.items()},
     }

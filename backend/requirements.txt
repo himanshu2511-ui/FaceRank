@@ -6,7 +6,6 @@ python-multipart
 python-jose[cryptography]
 passlib[argon2]
 mediapipe
-opencv-python-headless
 numpy
 pillow
 argon2-cffi
