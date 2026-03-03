@@ -5,6 +5,7 @@ psycopg2-binary
 python-multipart
 python-jose[cryptography]
 passlib[argon2]
+opencv-python-headless
 mediapipe
 numpy
 pillow
