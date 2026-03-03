@@ -1,0 +1,15 @@
+# Root
+*.log
+.DS_Store
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/facerank.db
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
